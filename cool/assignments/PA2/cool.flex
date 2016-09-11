@@ -51,37 +51,26 @@ extern YYSTYPE cool_yylval;
 
 DARROW          =>
 ASSIGN          <-
-INT             [:digit:]
-IDTAIL          [[[:alnum:]][:digit:]]_]
-BLANK           [\32\n\f\r\t\v]
-
+INT             [0-9]*
+IDTAIL          [[:alnum:]_]
+BLANK           [\x20\n\f\r\t\v]
+SYMBOL "+"|"/"|"-"|"*"|"="|"<"|"."|"~"|","|";"|":"|"("|")"|"@"|"{"|"}"
 %%
 
  /*
   *  Nested comments
   */
-
-
+"(*"[^<<EOF>>]*"*)"|"--"[^<<EOF>>\n]*   {printf("%s", yytext);}
  /*
   *  The multiple-character operators.
   */
-{DARROW}		{ return (DARROW);   }
-{ASSIGN}        { return  ASSIGN;    }
-{INT}+          { return  INT_CONST; }
-[a-z]{IDTAIL}*  { return  OBJECTID; }
-[A-Z]{IDTAIL}*  { return  TYPEID; }
+
 
  /*
   * Keywords are case-insensitive except for the values true and false,
   * which must begin with a lower-case letter.
   */
-
-
-
-
-
-
-(?i:class)         { return CLASS; }
+(?i:class)         { printf("result: '%s'", yytext); return CLASS; }
 (?i:else)          { return ELSE; }
 (?i:fi)            { return FI; }
 (?i:if)            { return IF; }
@@ -98,8 +87,15 @@ BLANK           [\32\n\f\r\t\v]
 (?i:new)           { return NEW; }
 (?i:of)            { return OF; }
 (?i:not)           { return NOT; }
-t(?i:rue)          { return BOOL_CONST; }
-f(?i:alse)         { return BOOL_CONST; }
+t(?i:rue)          { cool_yylval.boolean = 1; return BOOL_CONST; }
+f(?i:alse)         { cool_yylval.boolean = 0; return BOOL_CONST; }
+
+
+{DARROW}        { return (DARROW);   }
+{ASSIGN}        { return  ASSIGN;    }
+[a-z]{IDTAIL}*  { cool_yylval.symbol = idtable.add_string(yytext); return  OBJECTID; }
+[A-Z]{IDTAIL}*  { cool_yylval.symbol = idtable.add_string(yytext); return  TYPEID; }
+{INT}          { printf("Text: '%s'", yytext); cool_yylval.symbol = inttable.add_string(yytext); return  INT_CONST; }
 
  /*
   *  String constants (C syntax)
@@ -108,8 +104,8 @@ f(?i:alse)         { return BOOL_CONST; }
   *
   */
 
-
-{BLANK}            {}
-.                  { return ERROR; }
-
+\"(.*)\"     { printf("Text: '%s'", yytext); cool_yylval.symbol = stringtable.add_string(yytext); return STR_CONST;}
+{BLANK}      {}
+{SYMBOL}     { return yytext[0]; }
+.            { printf("Text: '%s'", yytext); return ERROR;}
 %%
