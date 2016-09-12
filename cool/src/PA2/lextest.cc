@@ -79,7 +79,6 @@ int main(int argc, char** argv) {
 	    //
 	    cout << "#name \"" << argv[optind] << "\"" << endl;
 	    while ((token = cool_yylex()) != 0) {
-	    	std::cout << "Check" << cool_token_to_string(token) << std::endl;
 		dump_cool_token(cout, curr_lineno, token, cool_yylval);
 	    }
 	    fclose(fin);

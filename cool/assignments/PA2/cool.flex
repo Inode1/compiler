@@ -132,7 +132,6 @@ f(?i:alse)         { cool_yylval.boolean = 0; return BOOL_CONST; }
 <str>\\0     { snprintf(string_buf, MAX_STR_CONST, "Null symbol determinate in const string, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } 
 <str>\\.     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = yytext[1];}
 <str>[^\\\n\"]+   {
-                       printf("123\n '%s'", yytext);
                        char *yptr = yytext;
                        while ( *yptr )
                        {
@@ -159,5 +158,5 @@ f(?i:alse)         { cool_yylval.boolean = 0; return BOOL_CONST; }
 "*)"         { snprintf(string_buf, MAX_STR_CONST, "Unmatched *), line %d", curr_lineno); cool_yylval.error_msg = string_buf; return ERROR;}
 {BLANK}      {}
 {SYMBOL}     { return yytext[0]; }
-.            { snprintf(string_buf, MAX_STR_CONST, "Non specified symbol '%c', line %d", yytext[0], curr_lineno); cool_yylval.error_msg = string_buf; return ERROR;}
+
 %%
