@@ -30,9 +30,13 @@ extern FILE *fin; /* we read from this file */
 #define YY_INPUT(buf,result,max_size) \
 	if ( (result = fread( (char*)buf, sizeof(char), max_size, fin)) < 0) \
 		YY_FATAL_ERROR( "read() in flex scanner failed");
-
+#undef ECHO
+#define ECHO
 char string_buf[MAX_STR_CONST]; /* to assemble string constants */
 char *string_buf_ptr;
+int badString = 0;
+
+int NestedComments = 0;
 
 extern int curr_lineno;
 extern int verbose_flag;
@@ -56,20 +60,22 @@ extern YYSTYPE cool_yylval;
 
 DARROW          =>
 ASSIGN          <-
+LE              <=
 INT             [0-9]+
 IDTAIL          [[:alnum:]_]
 BLANK           [\x20\n\f\r\t\v]
-SYMBOL "+"|"/"|"-"|"*"|"="|"<"|">"|"."|"~"|","|";"|":"|"("|")"|"@"|"{"|"}"|"["|"]"
+SYMBOL "+"|"/"|"-"|"*"|"="|"<"|"."|"~"|","|";"|":"|"("|")"|"@"|"{"|"}"
 %%
 
  /*
   *  Nested comments
   */
 "(*"               { BEGIN(comments);}
+<comments>"(*"     { ++NestedComments; }
 <comments><<EOF>>  { snprintf(string_buf, MAX_STR_CONST, "EOF in comment, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR;}
 <comments>\n       { ++curr_lineno; }
-<comments>[^"*)"\n]* 
-<comments>"*)"     { BEGIN(INITIAL);}
+<comments>[^"*)"\n"(*"]* 
+<comments>"*)"     { if (!NestedComments) BEGIN(INITIAL); else --NestedComments;}
 
 
 "--"               { BEGIN(comment);}
@@ -106,13 +112,12 @@ SYMBOL "+"|"/"|"-"|"*"|"="|"<"|">"|"."|"~"|","|";"|":"|"("|")"|"@"|"{"|"}"|"["|"
 t(?i:rue)          { cool_yylval.boolean = 1; return BOOL_CONST; }
 f(?i:alse)         { cool_yylval.boolean = 0; return BOOL_CONST; }
 
-
 {DARROW}        { return (DARROW);   }
 {ASSIGN}        { return  ASSIGN;    }
 [a-z]{IDTAIL}*  { cool_yylval.symbol = idtable.add_string(yytext); return  OBJECTID; }
 [A-Z]{IDTAIL}*  { cool_yylval.symbol = idtable.add_string(yytext); return  TYPEID; }
 {INT}           { cool_yylval.symbol = inttable.add_string(yytext); return  INT_CONST; }
-
+{LE}            { return LE;}
  /*
   *  String constants (C syntax)
   *  Escape sequence \c is accepted for all characters c. Except for 
@@ -121,28 +126,163 @@ f(?i:alse)         { cool_yylval.boolean = 0; return BOOL_CONST; }
   */
 
 \"           { string_buf_ptr = string_buf; BEGIN(str); }
-<str>\"      { *string_buf_ptr = 0; cool_yylval.symbol = stringtable.add_string(string_buf); BEGIN(INITIAL); return STR_CONST;}     
-<str><<EOF>> { snprintf(string_buf, MAX_STR_CONST, "EOF in const string, line %d", curr_lineno); cool_yylval.error_msg = string_buf; return ERROR; }
-<str>\n      { snprintf(string_buf, MAX_STR_CONST, "New line must be escaped, line %d", curr_lineno); BEGIN(INITIAL); cool_yylval.error_msg = string_buf; return ERROR;} 
-<str>\\n     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = '\n'; }
-<str>\\t     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = '\t'; }
-<str>\\r     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = '\r'; }
-<str>\\b     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = '\b'; }
-<str>\\f     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = '\f'; }
-<str>\\0     { snprintf(string_buf, MAX_STR_CONST, "Null symbol determinate in const string, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } 
-<str>\\.     { if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) { snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); cool_yylval.error_msg = string_buf; BEGIN(INITIAL); return ERROR; } *string_buf_ptr++ = yytext[1];}
-<str>[^\\\n\"]+   {
-                       char *yptr = yytext;
-                       while ( *yptr )
-                       {
-                          if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
-                          { 
-                            snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
-                            cool_yylval.error_msg = string_buf; return ERROR; 
-                          }
-                         *string_buf_ptr++ = *yptr++;
-                        }
-                      }
+<str>\"      { 
+                BEGIN(INITIAL); 
+                if (!badString)
+                {
+                  *string_buf_ptr = 0; 
+                  cool_yylval.symbol = stringtable.add_string(string_buf, string_buf_ptr - string_buf); 
+                  return STR_CONST;
+                }
+                badString = 0; 
+             }     
+<str><<EOF>> { 
+                BEGIN(INITIAL);
+                if (!badString)
+                {
+                  snprintf(string_buf, MAX_STR_CONST, "EOF in const string, line %d", curr_lineno); 
+                  cool_yylval.error_msg = string_buf;  
+                }
+                badString = 0;
+                return ERROR; 
+             }
+<str>\\\n     { 
+                ++curr_lineno; 
+                if (!badString)
+                {
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  {
+                    snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                    cool_yylval.error_msg = string_buf;  
+                    badString = 1;
+                    return ERROR; 
+                  } 
+                  *string_buf_ptr++ = '\n'; 
+                }
+              }
+<str>\n      { 
+                if (!badString)
+                {
+                  snprintf(string_buf, MAX_STR_CONST, "New line must be escaped, line %d", curr_lineno); 
+                  cool_yylval.error_msg = string_buf; 
+                  BEGIN(INITIAL);
+                  badString = 0;
+                  return ERROR;
+                }
+                BEGIN(INITIAL);
+                badString = 0;
+             } 
+<str>\\n     { 
+                if (!badString)
+                {
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  { 
+                    snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                    cool_yylval.error_msg = string_buf;  
+                    badString = 1;
+                    return ERROR; 
+                  } 
+                  *string_buf_ptr++ = '\n'; 
+                }
+             }
+<str>\\t     { 
+                if (!badString)
+                {
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  { 
+                    snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                    badString = 1;
+                    cool_yylval.error_msg = string_buf;  
+                    return ERROR; 
+                  } 
+                  *string_buf_ptr++ = '\t';
+                } 
+             }
+<str>\\b    {
+                if (!badString)
+                { 
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  { 
+                    badString = 1;
+                    snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                    cool_yylval.error_msg = string_buf;  
+                    return ERROR; 
+                  } 
+                  *string_buf_ptr++ = '\b'; 
+                }
+            }
+<str>\\f    {   
+                if (!badString)
+                { 
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  {
+                     badString = 1;
+                     snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                     cool_yylval.error_msg = string_buf;  
+                     return ERROR; 
+                   } 
+                   *string_buf_ptr++ = '\f';
+                } 
+            }
+<str>\0     { 
+                if (!badString)
+                { 
+                  snprintf(string_buf, MAX_STR_CONST, "Null symbol determinate in const string, line %d", curr_lineno); 
+                  badString = 1;
+                  cool_yylval.error_msg = string_buf; 
+                  return ERROR; 
+                }
+            } 
+<str>\\0    { 
+                if (!badString)
+                {
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  { 
+                    snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                    badString = 1;
+                    cool_yylval.error_msg = string_buf;  
+                    return ERROR; 
+                  } 
+                  *string_buf_ptr++ = '0'; 
+                }
+            } 
+<str>\\.    { 
+                if (!badString)
+                {
+                  if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                  {
+                     snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno);
+                     badString = 1; 
+                     cool_yylval.error_msg = string_buf;  
+                     return ERROR; 
+                  }
+                  if (!yytext[1]) 
+                  {
+                     snprintf(string_buf, MAX_STR_CONST, "Escaped null symbol, line %d", curr_lineno);
+                     badString = 1; 
+                     cool_yylval.error_msg = string_buf;  
+                     return ERROR;
+                  }
+                   *string_buf_ptr++ = yytext[1];
+                 }
+            }
+<str>[^\\\n\"\0]+   {
+                       if (!badString)
+                       { 
+                         char *yptr = yytext;
+                         while ( *yptr )
+                         {
+                            if (string_buf_ptr == string_buf + MAX_STR_CONST - 1) 
+                            { 
+                              snprintf(string_buf, MAX_STR_CONST, "String const max len, line %d", curr_lineno); 
+                              cool_yylval.error_msg = string_buf; 
+                              badString = 1; 
+                              return ERROR; 
+                            }
+                           *string_buf_ptr++ = *yptr++;
+                         }
+                       }
+                    }
 
 '            { string_buf_ptr = string_buf; BEGIN(sym);}
 <sym>'       { *string_buf_ptr = '\0'; cool_yylval.symbol = stringtable.add_string(string_buf); BEGIN(INITIAL); return STR_CONST;}
@@ -158,5 +298,5 @@ f(?i:alse)         { cool_yylval.boolean = 0; return BOOL_CONST; }
 "*)"         { snprintf(string_buf, MAX_STR_CONST, "Unmatched *), line %d", curr_lineno); cool_yylval.error_msg = string_buf; return ERROR;}
 {BLANK}      {}
 {SYMBOL}     { return yytext[0]; }
-
+.            { snprintf(string_buf, MAX_STR_CONST, "%s", yytext); cool_yylval.error_msg = string_buf; return ERROR;}
 %%
